@@ -1,128 +1,157 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>CHESSATHON · QR Checkpoint Tracker</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Chessathon Tracker</title>
 <style>
-    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
-    h1 { color: #333; }
-    button { padding: 10px 15px; margin: 5px; }
-    .view { margin-top: 20px; }
+  body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+  header { background: #222; color: #fff; padding: 1em; text-align: center; }
+  main { padding: 1em; }
+  nav button { margin: 0.2em; padding: 0.5em 1em; }
+  .hidden { display: none; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+  th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }
+  tr.flash { background-color: #c8f7c5 !important; transition: background-color 1s ease; }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 </head>
 <body>
-<h1>CHESSATHON · QR Checkpoint Tracker</h1>
-<p>Event prototype • offline-first • local-only (no server). Swap to Firebase later.</p>
-<div id="tabs"></div>
-<div id="app"></div>
+<header>
+  <h1>Chessathon Tracker</h1>
+</header>
+<main>
+  <nav>
+    <button onclick="showTab('organizer')">Organizer</button>
+    <button onclick="showTab('scan')">Player Check-In</button>
+    <button onclick="showTab('admin')">Admin</button>
+  </nav>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <!-- Organizer Tab -->
+  <section id="organizer">
+    <h2>Organizer: Add Checkpoint</h2>
+    <input id="checkpointName" placeholder="Checkpoint name" />
+    <button onclick="addCheckpoint()">Add</button>
+    <div id="qrContainer"></div>
+    <h3>Existing Checkpoints</h3>
+    <ul id="checkpointList"></ul>
+  </section>
+
+  <!-- Player Tab -->
+  <section id="scan" class="hidden">
+    <h2>Player: Check-In</h2>
+    <input id="playerId" placeholder="Your name or team" />
+    <input id="checkpointCode" placeholder="Checkpoint code" />
+    <button onclick="checkIn()">Confirm Check-In</button>
+    <p id="scanStatus"></p>
+  </section>
+
+  <!-- Admin Tab -->
+  <section id="admin" class="hidden">
+    <h2>Admin: Live Check-Ins</h2>
+    <table>
+      <thead>
+        <tr><th>Player</th><th>Checkpoint</th><th>Time</th></tr>
+      </thead>
+      <tbody id="checkinTable"></tbody>
+    </table>
+  </section>
+</main>
+
 <script>
-let current = 'player';
-let playerId = localStorage.getItem('playerId') || '';
-let checkpoints = JSON.parse(localStorage.getItem('checkpoints') || '[]');
-let checkins = JSON.parse(localStorage.getItem('checkins') || '[]');
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyDX8K85sA807SwMKwdJ3S6AyWH3LaUhw0c",
+  authDomain: "chessathon-trkr.firebaseapp.com",
+  projectId: "chessathon-trkr",
+  storageBucket: "chessathon-trkr.firebasestorage.app",
+  messagingSenderId: "332693668426",
+  appId: "1:332693668426:web:6945b9b31967d8b7995cb3",
+  measurementId: "G-57J6GKTCDF"
+};
 
-function setView(v) { current = v; render(); }
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-function PlayerView() {
-    const div = document.createElement('div');
-    div.className = 'view';
-    const input = document.createElement('input');
-    input.placeholder = 'Enter your name';
-    input.value = playerId;
-    const btn = document.createElement('button');
-    btn.textContent = 'Create My Player ID';
-    btn.onclick = () => {
-        playerId = input.value.trim();
-        localStorage.setItem('playerId', playerId);
-        alert('Player ID saved!');
-    };
-    div.append(input, btn);
-    return div;
+const EVENT_ID = "chessathon-2025";
+
+function showTab(tab) {
+  document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+  document.getElementById(tab).classList.remove('hidden');
 }
 
-function OrganizerView() {
-    const div = document.createElement('div');
-    div.className = 'view';
-    const input = document.createElement('input');
-    input.placeholder = 'Checkpoint name';
-    const btn = document.createElement('button');
-    btn.textContent = 'Add Checkpoint';
-    btn.onclick = () => {
-        const name = input.value.trim();
-        if (!name) return alert('Enter a name');
-        const id = 'cp-' + Date.now();
-        checkpoints.push({ id, name });
-        localStorage.setItem('checkpoints', JSON.stringify(checkpoints));
-        render();
-    };
-    div.append(input, btn);
+// Organizer: Add checkpoint
+async function addCheckpoint() {
+  const name = document.getElementById("checkpointName").value.trim();
+  if (!name) return alert("Enter a checkpoint name");
+  const code = name.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now();
+  await db.collection("events").doc(EVENT_ID).collection("checkpoints").doc(code).set({ name });
+  const url = window.location.origin + window.location.pathname + "?checkpoint=" + code;
+  document.getElementById("qrContainer").innerHTML = "";
+  QRCode.toCanvas(document.createElement('canvas'), url, function (err, canvas) {
+    if (!err) document.getElementById("qrContainer").appendChild(canvas);
+  });
+  document.getElementById("checkpointName").value = "";
+}
 
-    checkpoints.forEach(cp => {
-        const p = document.createElement('p');
-        p.textContent = cp.name;
-        const canvas = document.createElement('canvas');
-        QRCode.toCanvas(canvas, location.href.split('#')[0] + '#scan?cp=' + cp.id);
-        div.append(p, canvas);
+// Load checkpoints list
+db.collection("events").doc(EVENT_ID).collection("checkpoints")
+  .onSnapshot(snapshot => {
+    const list = document.getElementById("checkpointList");
+    list.innerHTML = "";
+    snapshot.forEach(doc => {
+      const li = document.createElement("li");
+      li.textContent = doc.data().name + " (" + doc.id + ")";
+      list.appendChild(li);
     });
+  });
 
-    return div;
+// Player check-in
+async function checkIn() {
+  const playerId = document.getElementById("playerId").value.trim();
+  const code = document.getElementById("checkpointCode").value.trim();
+  if (!playerId || !code) return alert("Enter both player ID and checkpoint code");
+
+  // Verify checkpoint exists
+  const cpDoc = await db.collection("events").doc(EVENT_ID).collection("checkpoints").doc(code).get();
+  if (!cpDoc.exists) {
+    document.getElementById("scanStatus").textContent = "Invalid checkpoint.";
+    return;
+  }
+
+  const time = new Date();
+  await db.collection("events").doc(EVENT_ID).collection("checkins").add({
+    playerId, checkpoint: cpDoc.data().name, time: time.toISOString()
+  });
+
+  document.getElementById("scanStatus").textContent = "Checked in at " + cpDoc.data().name;
+  document.getElementById("checkpointCode").value = "";
 }
 
-function ScanView() {
-    const div = document.createElement('div');
-    div.className = 'view';
-    const params = new URLSearchParams(location.hash.split('?')[1]);
-    const cpId = params.get('cp');
-    const cp = checkpoints.find(c => c.id === cpId);
-    if (!cp) { div.textContent = 'Invalid checkpoint.'; return div; }
-    const btn = document.createElement('button');
-    btn.textContent = 'Confirm Check-In at ' + cp.name;
-    btn.onclick = () => {
-        if (!playerId) return alert('Set your Player ID first!');
-        checkins.push({ playerId, cpId, time: new Date().toLocaleString() });
-        localStorage.setItem('checkins', JSON.stringify(checkins));
-        alert('Check-in recorded!');
-    };
-    div.append(btn);
-    return div;
+// Auto-fill checkpoint from URL param
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.has("checkpoint")) {
+  showTab("scan");
+  document.getElementById("checkpointCode").value = urlParams.get("checkpoint");
 }
 
-function AdminView() {
-    const div = document.createElement('div');
-    div.className = 'view';
-    checkins.forEach(c => {
-        const cp = checkpoints.find(cp => cp.id === c.cpId);
-        const p = document.createElement('p');
-        p.textContent = c.time + ' - ' + c.playerId + ' @ ' + (cp ? cp.name : 'Unknown');
-        div.append(p);
+// Admin: live check-in table
+db.collection("events").doc(EVENT_ID).collection("checkins").orderBy("time")
+  .onSnapshot(snapshot => {
+    const table = document.getElementById("checkinTable");
+    table.innerHTML = "";
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const tr = document.createElement("tr");
+      const localTime = new Date(data.time).toLocaleString();
+      tr.innerHTML = "<td>" + data.playerId + "</td><td>" + data.checkpoint + "</td><td>" + localTime + "</td>";
+      tr.classList.add("flash");
+      table.appendChild(tr);
+      setTimeout(() => tr.classList.remove("flash"), 1000);
     });
-    return div;
-}
-
-function render() {
-    const tabsEl = document.getElementById('tabs');
-    tabsEl.innerHTML = '';
-    [['player','Player'], ['organizer','Organizer'], ['scan','Scan'], ['admin','Admin']].forEach(([id,label]) => {
-        const b = document.createElement('button');
-        b.textContent = label;
-        if (id === current) b.style.fontWeight = 'bold';
-        b.onclick = () => setView(id);
-        tabsEl.append(b);
-    });
-
-    const root = document.getElementById('app');
-    root.innerHTML = '';
-    if (current === 'player') root.appendChild(PlayerView());
-    if (current === 'organizer') root.appendChild(OrganizerView());
-    if (current === 'scan') root.appendChild(ScanView());
-    if (current === 'admin') root.appendChild(AdminView());
-}
-
-if (location.hash.startsWith('#scan')) current = 'scan';
-render();
+  });
 </script>
 </body>
 </html>
